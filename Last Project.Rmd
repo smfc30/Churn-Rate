@@ -1,0 +1,573 @@
+---
+title: "Tackling Churn Rate Challenges & Customer Retention"
+author: "Sandra Martín-Forero Cogolludo"
+date: "2/9/2024"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Churn Rate Project
+
+## 1. Context and objetive of the project
+
+Churn rate refers to the rate of customer's attrition, which means how many customers stop using a company's service within a certain period of time. The aim of this project is to understand better what characteristics or behaviours are related to the customers when they leave company's services.
+
+Having understood this, the company is able to take into consideration new measures to improve customer retention, such as enhacing its services or personalizing offers.
+
+## 2. Tools used
+
+To develop this analysis, it has been used several different tools and libraries:
+
+```{r librerías}
+library(corrplot)
+library(ggplot2)
+library(reshape2)
+library(tidyr)
+library(dplyr)
+library(DataExplorer)
+library(caret)
+library(randomForest)
+library(ROCR)
+```
+
+*· Readxl:* It allows to read any database from Excel. In this project, it is used to read the data from a file .xlsx
+
+*· Corrplot:* This library is used to create correlation plots. It helps to visualize how are the variable's interactions.
+
+*· Ggplot2 and Reshape2:* These are libraries for data visualization. ggplot2 is used to create advanced plots, while reshape2 helps reorganize data to make it easier to plot.
+
+*· Tidyr and Dplyr:* Two powerful tools that helps so much in terms of organization and manipulation.
+
+*· DataExplorer:* A tool that facilitates the initial exploration of the data to understand its structure and characteristics.
+
+*· Caret:* A library of predictive modeling tools. It is used here to prepare the data and build models that can predict customer churn.
+
+*· RandomForest:* An advanced analysis method that creates multiple "decision trees" and uses them to make predictions. It is useful for understanding complex patterns in the data.
+
+*· ROCR:* It is used to evaluate the accuracy of predictive models, helping to determine how well the model is predicting the churn rate.
+
+## 3. Analysis steps 
+
+*Step 1: Data Loading and Cleaning*
+
+The project begins by loading customer data from an Excel file (BankChurners.csv). This data contains various pieces of information about each customer, such as:
+
+```{r Data loading}
+library(readr)
+BankChurners <- read_csv("G:/Datos Sandra/Descargas/BankChurners.csv") #Estos datos se han descargado previamente en la carpeta descargas
+View(BankChurners)
+options(scipen=999)
+BankChurners <- BankChurners %>% select(-Naive_Bayes_Classifier_Attrition_Flag_Card_Category_Contacts_Count_12_mon_Dependent_count_Education_Level_Months_Inactive_12_mon_1, -Naive_Bayes_Classifier_Attrition_Flag_Card_Category_Contacts_Count_12_mon_Dependent_count_Education_Level_Months_Inactive_12_mon_2)
+```
+· Gender.
+· Customer's age.
+· Their marital status and education level.
+· Customer's card category..
+· Call duration at different times of the day (day, night, evening).
+· Number of months the customer is inactive.
+· Whether or not they churned (left the company).
+
+```{r summary}
+summary_bc <- sapply(BankChurners[sapply(BankChurners, is.factor) | sapply(BankChurners, is.character)], summary)
+summary_bc <- t(summary_bc)
+print(summary_bc)
+```
+```{r summary of variables and lost values}
+plot_intro(BankChurners)
+```
+Here we have a brief that shows that the database hasn't got any missing value. If the database had contained a missing value, it'd have been necessary to prepare a more extensive analysis, including NA's substitution.
+
+```{r counts for categories}
+object_columns <- names(BankChurners)[sapply(BankChurners, is.factor) | sapply(BankChurners, is.character)]
+print(object_columns)
+for (col in object_columns) {
+  d_type <- class(BankChurners[[col]])
+  
+  counts <- table(BankChurners[[col]])
+  cat("Counts for", col, ":\n")
+  print(counts)
+  cat("============================================================\n")
+}
+```
+```{r numeric variables}
+num_columns <- names(BankChurners)[sapply(BankChurners, is.numeric)]
+print(num_columns)
+```
+With the next chunk, it will be demonstrated that there are no missing values.
+
+```{r missing values}
+missing_columns <- names(BankChurners)[sapply(BankChurners, function(x) sum(is.na(x)) > 0)]
+bc_missing_info <- BankChurners[, missing_columns]
+str(bc_missing_info)
+```
+Here, it will be demonstrated the same but with duplicated values.
+
+```{r duplicated values}
+BankChurners <- BankChurners[!duplicated(BankChurners), ]
+duplicated_rows <- duplicated(BankChurners)
+print(duplicated_rows)
+```
+
+*Step 2: Correlation Analysis*
+
+A correlation matrix is created to identify the most important variables that are tightly linked to the churn rate.
+
+*What is a correlation matrix?* Imagine a table that compares all the customer characteristics against each other. Each cell in the table shows how strongly two characteristics are related. A high value may indicate that two characteristics tend to increase or decrease together. For example, if the number of months inactive and the clients who churned are highly correlated, it means when one increases, the other does as well.
+
+*Why is it important?* It helps us identify which characteristics might be influencing a customer's decision to leave the company. For instance, if we find a high correlation between the number of months inactive and churn, we might infer that unresolved issues could be pushing customers to leave.
+
+```{r conversion of the variable from factor to boolean}
+BankChurners$Churners <- BankChurners$Attrition_Flag == "Attrited Customer"
+
+print(BankChurners)
+```
+
+
+```{r correlation matrix}
+numeric_cols <- BankChurners[, c("Months_on_book", "Total_Relationship_Count", "Months_Inactive_12_mon", "Contacts_Count_12_mon", "Credit_Limit","Total_Revolving_Bal","Avg_Open_To_Buy","Total_Amt_Chng_Q4_Q1","Total_Trans_Amt","Total_Trans_Ct","Total_Ct_Chng_Q4_Q1","Avg_Utilization_Ratio","Attrition_Flag","Churners")]
+
+df <- mutate_if(BankChurners, is.character, as.numeric) 
+
+str(df) 
+
+numeric_cols <- BankChurners[, c("Months_on_book", "Total_Relationship_Count", "Months_Inactive_12_mon", "Contacts_Count_12_mon", "Credit_Limit","Total_Revolving_Bal","Avg_Open_To_Buy","Total_Amt_Chng_Q4_Q1","Total_Trans_Amt","Total_Trans_Ct","Total_Ct_Chng_Q4_Q1","Avg_Utilization_Ratio","Churners")]
+correlation_matrix <- cor(numeric_cols)
+
+correlation_df <- melt(correlation_matrix)
+ggplot(correlation_df, aes(x = Var1, y = Var2, fill = value)) +
+geom_tile(color = "white") +
+scale_fill_gradient2(low = "blue", high = "orange", mid = "white", midpoint = 0, 
+limit = c(-1,1), space = "Lab", name="Correlation") +
+theme_minimal() +
+theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+coord_fixed()
+```
+It has been showed that the variables called "Contact_counts_12_mon" and "Months_Inactive_12_mon" have a high correlation with Churners, so they will be the objetive of this study. 
+
+*Step 3: Data Visualization*
+
+Charts are created to visualize the results of the correlation analysis.
+
+*What is visualized?* The charts could show which characteristics are more related to churn. Using colors, sizes, and shapes, it becomes clear which relationships are stronger.
+
+*Why is it useful?* Data visualization allows to quickly understand the results of the analysis without the need to interpret complex numbers.
+
+```{r customers churned}
+ggplot(BankChurners, aes(x = factor(Churners), y = Months_Inactive_12_mon)) +
+  geom_boxplot() +
+  labs(x = "Churners", y = "Months_Inactive_12_mon") +
+  theme_minimal()
+```
+
+```{r plot frequencies}
+gr<- BankChurners %>%
+     gather() %>%
+     ggplot(aes(value, fill = key)) +
+     geom_bar() +
+     facet_wrap(~ key, scales = "free") +
+     theme(
+         axis.text = element_text(size = 5),
+         axis.title = element_text(size = 6),
+         legend.text = element_text(size = 6),
+         legend.position = "bottom") 
+print(gr)
+ggsave("BankChurners_plot.png", plot =gr, width = 12, height = 8, units = "in", dpi = 300)
+```
+At this point, it may be so useful to split up the clients into churners, genders,...
+
+```{r spliting up}
+churned <- BankChurners[BankChurners$Attrition_Flag == "Attrited Customer", ]
+non_churned <- BankChurners[BankChurners$Attrition_Flag == "Existing Customer", ]
+
+female <- BankChurners[BankChurners$Gender == "F", ]
+male <- BankChurners[BankChurners$Gender == "M", ]
+```
+
+```{r distribution of gender}
+#We can also determine the churn rate based on gender:
+
+churn_male <- mean(male$Churners == TRUE)
+
+churn_female <- mean(female$Churners == TRUE)
+
+
+plot_bar_single <- function(column) {
+  target_column <- table(BankChurners[["Gender"]])
+  
+
+  barplot(target_column, 
+          col = rainbow(length(target_column)), 
+          main = paste("Distribution of", "Gender"), 
+          xlab = "Gender", 
+          ylab = "Count",
+          cex.names = 1.2,
+          cex.lab = 1.2,
+          cex.main = 1.4,
+          las = 2) 
+}
+
+plot_bar_single("name_of_the_column")
+```
+This is the distribution of customers that have churned by gender.
+
+```{r churned summary}
+summary_churned <- summary(churned)
+
+transposed_summary_churned <- t(summary_churned)
+
+print(transposed_summary_churned)
+```
+```{r not churned summary}
+
+summary_non_churned <- summary(non_churned)
+
+transposed_summary_non_churned <- t(summary_non_churned)
+
+print(transposed_summary_non_churned)
+```
+
+
+```{r churn representation}
+plot_pie_single <- function(column) {
+  target_column <- table(BankChurners[["Attrition_Flag"]])
+  pie_percent <- round(100 * target_column / sum(target_column), 1)
+  
+  pie(target_column, 
+      labels = paste(names(target_column), pie_percent, "%"), 
+      main = paste("Distribution of", "Attrition_Flag"), 
+      col = rainbow(length(target_column)),
+      cex = 1.2)
+}
+
+
+plot_pie_single("name_of_the_column")
+```
+```{r distribution of churners}
+plot_bar_single <- function(column) {
+  target_column <- table(BankChurners[["Attrition_Flag"]])
+  
+
+  barplot(target_column, 
+          col = rainbow(length(target_column)), 
+          main = paste("Distribution of", "Attrition_Flag"), 
+          xlab = "Attrition_Flag", 
+          ylab = "Count",
+          cex.names = 1.2,
+          cex.lab = 1.2,
+          cex.main = 1.4,
+          las = 2) 
+}
+
+
+plot_bar_single("name_of_the_column")
+```
+```{r graphics}
+num_col <- names(BankChurners)[sapply(BankChurners, is.numeric)]
+
+custom_colors <- c("sky blue", "pink")
+
+# Generate histograms for each numerical column:
+for (col in num_col) {
+
+  p <- ggplot(BankChurners, aes(x = .data[[col]], fill = Attrition_Flag)) +
+    geom_histogram(position = "identity", alpha = 0.5, bins = 30) +
+    labs(title = paste("Distribution of", col, "vs Attrition_Flag"),
+         x = col,
+         y = "Count") +
+    scale_fill_manual(values = custom_colors) +  # Aplica los colores personalizados
+    theme_minimal()
+  
+  print(p)
+}
+```
+```{r graphics 2}
+
+cat_cols <- names(BankChurners)[sapply(df, is.factor) | sapply(BankChurners, is.character)]
+
+custom_colors <- c("sky blue", "pink")
+# Generate histograms for each categorical column:
+for (col in cat_cols) {
+
+  h <- ggplot(BankChurners, aes_string(x = col, fill = "Attrition_Flag")) +
+    geom_bar(position = "dodge") +
+    labs(title = paste("Distribution of", col, "vs Attrition_Flag"),
+         x = col,
+         y = "Count") +
+    scale_fill_manual(values = custom_colors) +  # Aplica los colores personalizados
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+  
+  print(h)
+
+  cat("\n")
+}
+```
+```{r churners splitting into genders}
+plot_pie_single <- function(column) {
+  target_column <- table(BankChurners[["Gender"]])
+  pie_percent <- round(100 * target_column / sum(target_column), 1)
+  
+  pie(target_column, 
+      labels = paste(names(target_column), pie_percent, "%"), 
+      main = paste("Distribution of", "Gender"), 
+      col = rainbow(length(target_column)),
+      cex = 1.2)
+}
+
+
+plot_pie_single("Gender")
+```
+```{r distribution of customers age by attrition flag}
+ggplot(BankChurners, aes(x = Customer_Age, fill = Attrition_Flag)) +
+  geom_bar(position = "dodge") +
+  labs(x = "Age",
+       y = "Count",
+       title = "Distribution of Customer Age by Attrition Flag") +
+  theme_minimal(base_size = 14) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+*Step 4: Classification of Customers by Usage Levels*
+
+A new variable is created that classifies customers into two groups: High and Low usage, based on the total number of daytime call minutes.
+
+*How is it defined?* If a customer has been more than 2 months inactive, they are classified as "Low". If they have fewer, they are classified as "High".
+
+*Why is this done?* This classification helps segment customers and better understand which type of user is more likely to churn. For example, if we find that high-usage customers have a higher churn rate, the bank might consider offering special plans or incentives to retain this group.
+
+```{r classification of customers by usage levels}
+umbral <- 2 ##It has been chosen 2 months of inactivity 
+consumption_level_grouping <- ifelse(BankChurners$Months_Inactive_12_mon >= umbral, "Low", "High")
+
+print(consumption_level_grouping)
+```
+*Step 5: Statistical analysis*
+
+Now let's delve deeper into the statistical analysis of the data:
+
+```{r str analysis}
+head(BankChurners)
+str(BankChurners)
+summary(BankChurners)
+```
+All the variables are transformed into factor to avoid future codyfing problems.
+
+```{r transformation into factor}
+
+Bank_table <- mutate_if(BankChurners, is.character, as.factor) 
+
+Bank_table <- mutate_if(BankChurners, is.double, as.factor) 
+
+Bank_table <- mutate_if(BankChurners, is.logical, as.factor) 
+
+str(Bank_table) 
+```
+*· Classification model construction*
+
+In this point of the study, it is important to consider a method that includes only the variables that are significantly related to the churn. As we previously saw in correlation analysis, these variables are "Contact_counts_12_mon" and "Months_Inactive_12_mon". It is better to discard the rest of the variables if we want to achieve a more accurate result.
+
+```{r construction of the classification model with glm}
+set.seed(123)  #For more reproducibility 
+trainIndex <- createDataPartition(Bank_table$Churners, p = 0.7, list = FALSE)
+trainData <- Bank_table[trainIndex, ]
+testData <- Bank_table[-trainIndex, ]
+
+Bank_table$random<-sample(0:1,size = nrow(Bank_table),replace = T,prob = c(0.3,0.7)) 
+
+rl<- glm(Churners ~ Contacts_Count_12_mon + Months_Inactive_12_mon, trainData, family=binomial(link='logit'))
+
+summary(rl)
+```
+*Interpretation of the coefficients:*
+
+*Intercept (Constant): -3.95010*
+
+The intercept value indicates that when both the number of contacts and inactive months are 0, the log-odds of churn is -3.95010. This value is difficult to interpret directly, but it indicates a low probability of churn in that baseline case (no contacts and no inactivity).
+
+*Contacts_Count_12_mon (0.48691):*
+
+Each additional contact in the past 12 months increases the log-odds of a customer churning by 0.48691. In terms of probability, this means that a higher number of contacts leads to a higher likelihood of the customer churning. A positive coefficient indicates that customer contacts are correlated with a higher risk of churn. 
+
+Probability: To better interpret this number, it could be converted it to an odds ratio: 𝑒^0.48691 ≈ 1.627. This means that for every additional contact, the likelihood of churn increases by approximately 62.7%.
+
+*Months_Inactive_12_mon (0.40498):*
+
+Related to the months inactive, each additional month of inactivity in the past 12 months increases the log-odds of churn by 0.40498. Talking about probability, a customer who has been inactive for a longer time is more likely to churn. The positive coefficient indicates that more months of inactivity are associated with a higher risk of churn. 
+
+Probability: We convert this coefficient to an odds ratio: 𝑒^0.40498 ≈ 1.499 This means that for every additional month of inactivity, the likelihood of churn increases by approximately 49.9%.
+
+*Significance of the coefficients:* The p-values (Pr(>|z|)) are extremely small for both predictor variables (Contacts_Count_12_mon and Months_Inactive_12_mon), meaning they are statistically significant. This implies that we can conclude with a high level of confidence that both the number of contacts and months of inactivity significantly influence the probability of a customer churning.
+
+#Conclusions of this model: 
+
+*· Contacts_Count_12_mon:* The more contacts a customer has had with the company in the past 12 months, the higher the likelihood of churn. This suggests that more interactions (perhaps related to problems or complaints) could be a sign of dissatisfaction.
+
+*· Months_Inactive_12_mon:* The more months a customer has been inactive in the past 12 months, the higher the likelihood of churn. Prolonged inactivity is a strong indicator that the customer may leave the company.
+
+All in all, both factors have a significant impact on the likelihood of churn. These findings could help the company focus its efforts on customers with high contact frequency or long periods of inactivity to try to retain them.
+
+Now let's delve into another model: RandomForest
+
+```{r construction of the classification model with randomforest}
+model <- randomForest(Churners ~ Contacts_Count_12_mon + Months_Inactive_12_mon, data = trainData)
+print(model)
+summary(model)
+```
+
+```{r trying to improve the model}
+# Trying to increase the number of trees to 1000 to improve the model
+random_forest_model <- randomForest(
+  formula = Churners ~ Contacts_Count_12_mon + Months_Inactive_12_mon, 
+  data = trainData, 
+  ntree = 1000
+)
+
+print(random_forest_model)
+```
+*Key results:*
+
+OOB (Out-of-Bag) error estimate: The 15.5% OOB error means the model misclassifies 15.5% of the observations when they are not used in training. This is a measure of the model's accuracy, and a 15.5% error is relatively high.
+
+*Confusion matrix:*
+
+#FALSE class (non-churners):
+The model correctly predicted 5945 observations.
+It incorrectly classified 5 observations as churners (TRUE).
+The class error for non-churners is very low, at 0.084%, indicating the model is very good at identifying customers who do not churn.
+
+#TRUE class (churners):
+Only 45 churners were correctly classified.
+1094 churners were incorrectly classified as non-churners.
+The class error is very high, at 96%, meaning the model struggles significantly to identify churners.
+
+*General interpretation:*
+
+The model has a low error rate for correctly predicting customers who do not churn, but it performs very poorly when predicting those who do churn, suggesting it is highly imbalanced or that the selected variables are not sufficient to adequately capture churn behavior. It could be improved by tuning the model parameters, adding more predictive variables, or addressing the class imbalance.
+
+```{r confusion matrix}
+confusion<-function(real,scoring,umbral){ 
+  conf<-table(real,scoring>=umbral)
+  if(ncol(conf)==2) return(conf) else return(NULL)
+}
+
+metrics<-function(matrix_conf){
+  success <- (matrix_conf[1,1] + matrix_conf[2,2]) / sum(matrix_conf) *100
+  precision <- matrix_conf[2,2] / (matrix_conf[2,2] + matrix_conf[1,2]) *100
+  recall <- matrix_conf[2,2] / (matrix_conf[2,2] + matrix_conf[2,1]) *100
+  F1 <- 2*precision*recall/(precision+recall)
+  output<-c(success,precision,recall,F1)
+  return(output)
+}
+
+
+thresholds<-function(real,scoring){
+  thresholds<-data.frame(
+threshold=rep(0,times=19),success=rep(0,times=19),precision=rep(0,times=19),recall=rep(0,times=19),F1=rep(0,times=19))
+  cont <- 1
+  for (cada in seq(0.05,0.95,by = 0.05)){
+    data<-metrics(confusion(real,scoring,cada))
+    register<-c(cada,data)
+    thresholds[cont,]<-register
+    cont <- cont + 1
+  }
+  return(thresholds)
+}
+
+```
+
+```{r ROC and AUC}
+
+roc<-function(prediction){
+  r<-performance(prediction,'tpr','fpr')
+  plot(r)
+}
+
+auc<-function(prediction){
+  a<-performance(prediction,'auc')
+  return(a@y.values[[1]])
+}
+
+```
+
+```{r predictions glm}
+rl_predict<-predict(rl,testData,type = 'response')
+head(rl_predict)
+```
+
+```{r thresholds}
+thr_rl<-thresholds(testData$Churners,rl_predict)
+thr_rl
+```
+
+```{r thresholds F1}
+thr_final_rl<-thr_rl[which.max(thr_rl$F1),1]
+thr_final_rl
+```
+
+```{r conf matrix} 
+confusion(testData$Churners,rl_predict,thr_final_rl)
+```
+```{r metrics}
+rl_metrics<-filter(thr_rl,threshold==thr_final_rl)
+rl_metrics
+```
+```{r ROC curve}
+#Creation of prediction object
+rl_prediction<-prediction(rl_predict,testData$Churners)
+#ROC
+roc_curve <-roc(rl_prediction)
+```
+
+```{r AUC}
+auc<-function(rl_prediction){
+  a<-performance(rl_prediction,'auc')
+  return(a@y.values[[1]])
+}
+```
+
+
+```{r definitive metrics}
+rl_metrics<-cbind(rl_metrics,AUC=round(auc(rl_prediction),2)*100)
+print(t(rl_metrics))
+```
+
+*Summary and Interpretation:*
+
+*Success Rate:* The model has a success rate of 70.97% for correctly identifying customers who churn with this threshold.
+
+*Precision and Recall:* Precision is relatively low (29.22%), suggesting many false positives (customers classified as churners who are not). Recall is moderate (56.76%), indicating that the model is reasonably good at identifying most churners, but not perfect.
+
+*F1 Score:* The F1 score of 38.58 reflects a balance between precision and recall, but the value is low, suggesting there is room for improvement in both aspects.
+
+*AUC:* The AUC value of 70.00% is decent but also indicates that the model has room for improvement in its ability to discriminate between the two classes.
+
+##4. Expected Results and Next Steps
+
+At the end of the analysis, the goal is to have a list of factors that are highly related to the churn rate. This will allow the company three key takeaways:
+
+*· Identify pain points:* If it is found that a high number of inactivity months is associated with churn, the company could improve its customer service to resolve issues more efficiently and reduce churn.
+
+*· Personalize offers:* With the segmentation into "High" and "Low" usage, specific offers can be designed for each group, improving satisfaction and reducing the likelihood of churn.
+
+*· Improve predictive models:* Using the data and analysis, models can be created to more accurately predict which customers are at higher risk of leaving, allowing the company to take preventive measures.
+
+These insights can take us further; let's consider a few questions: How can we reduce the churn rate more effectively? How would you select these clients in order to maximize the success and benefit of these actions? We should focus on applying this analysis to a specific target audience.
+
+```{r prevent churn}
+BankChurners$churn_prob <- predict(rl, BankChurners, type = "response")
+top_500_customers <- BankChurners %>% arrange(desc(churn_prob)) %>% head(500)
+head(top_500_customers)
+```
+##5. Conclusions
+
+· Months of inactivity have a significant impact on churn.
+
+· The more contacts a customer has had with the company in the past 12 months, the higher the likelihood of churn. This suggests that more interactions could be a sign of dissatisfaction.
+
+· The logistic regression model has acceptable accuracy, suggesting it is suitable for predicting churn.
+
+· Marketing campaigns can be more effective if they target a cluster of customers identified as having a higher likelihood of churn.
+
